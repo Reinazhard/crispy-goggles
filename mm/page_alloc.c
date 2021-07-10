@@ -4986,6 +4986,7 @@ __alloc_pages_slowpath(gfp_t gfp_mask, unsigned int order,
 	unsigned int zonelist_iter_cookie;
 	int reserve_flags;
 	unsigned long alloc_start = jiffies;
+	bool used_vmpressure = false;
 	/*
 	 * We also sanity check to catch abuse of atomic reserves being used by
 	 * callers that are not in atomic context.
@@ -5019,8 +5020,11 @@ restart:
 	if (!ac->preferred_zoneref->zone)
 		goto nopage;
 
-	if (alloc_flags & ALLOC_KSWAPD)
+	if (alloc_flags & ALLOC_KSWAPD) {
+		if (!used_vmpressure)
+			used_vmpressure = vmpressure_inc_users(order);
 		wake_all_kswapds(order, gfp_mask, ac);
+	}
 
 	/*
 	 * The adjusted alloc_flags might result in immediate success, so try
@@ -5125,6 +5129,8 @@ retry:
 		goto got_pg;
 
 	/* Try direct reclaim and then allocating */
+	if (!used_vmpressure)
+		used_vmpressure = vmpressure_inc_users(order);
 	page = __alloc_pages_direct_reclaim(gfp_mask, order, alloc_flags, ac,
 							&did_some_progress);
 	if (page)
@@ -5249,6 +5255,16 @@ fail:
 	warn_alloc(gfp_mask, ac->nodemask,
 			"page allocation failure: order:%u", order);
 got_pg:
+<<<<<<< HEAD
+=======
+	if (woke_kswapd)
+		atomic_long_dec(&kswapd_waiters);
+	if (used_vmpressure)
+		vmpressure_dec_users();
+	if (!page)
+		warn_alloc(gfp_mask, ac->nodemask,
+				"page allocation failure: order:%u", order);
+>>>>>>> 4f3a4c8afc49 (mm: vmpressure: Fix rampant inaccuracies caused by stale data usage)
 	trace_android_vh_alloc_pages_slowpath(gfp_mask, order, alloc_start);
 	return page;
 }
