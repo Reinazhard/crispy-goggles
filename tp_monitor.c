@@ -28,6 +28,12 @@ static void tp_rate_pps_update(struct tp_monitor_counts *counts)
 		count->pps = cur_cnt - count->pre_packet_cnt;
 		count->pre_packet_cnt = cur_cnt;
 		count->pre_packet_bytes = cur_bytes;
+#ifdef TP_DEBUG
+		count->max_packet_bytes = max(count->max_packet_bytes, count->packet_bytes);
+		count->max_packet_cnt = max(count->max_packet_cnt, count->packet_cnt);
+		count->max_pps = max(count->max_pps, count->pps);
+		count->max_rate = max(count->max_rate, count->rate);
+#endif /* TP_DEBUG */
 	}
 }
 
@@ -141,10 +147,14 @@ static int tp_show(struct seq_file *s, void *unused)
 			seq_printf(s, "AC %d ->\n", i);
 		else
 			seq_puts(s, "Total ->\n");
-		seq_printf(s, "packet_cnt   : %llu\n", counter->packet_cnt);
-		seq_printf(s, "packet_bytes : %llu\n", counter->packet_bytes);
-		seq_printf(s, "rate (Kbits) : %llu\n", counter->rate / 1000);
-		seq_printf(s, "pps          : %llu\n", counter->pps);
+		seq_printf(s, "packet_cnt   : %llu (%llu)\n",
+			counter->packet_cnt, counter->max_packet_cnt);
+		seq_printf(s, "packet_bytes : %llu (%llu)\n",
+			counter->packet_bytes, counter->max_packet_bytes);
+		seq_printf(s, "rate (Kbits) : %llu (%llu)\n",
+			counter->rate / 1000, counter->max_rate / 1000);
+		seq_printf(s, "pps          : %llu (%llu)\n",
+			counter->pps, counter->pps);
 	}
 	return 0;
 }
@@ -165,17 +175,26 @@ static int tp_monitor_debugfs_init(struct wlan_ptracker_core *core)
 {
 	struct wlan_ptracker_debugfs *debugfs = &core->debugfs;
 	struct tp_monitor_stats *stats = &core->tp;
-	struct wlan_ptracker_client *client = core->client;
+	struct wlan_ptracker_client *client;
+	int ret = 0;
 
-	if (!client)
-		return 0;
+	rcu_read_lock();
+	client = rcu_dereference(core->client);
+	if (!client) {
+		ret = -ENODEV;
+		goto out;
+	}
 	stats->dir = debugfs_create_dir(client->ifname, debugfs->root);
-	if (!stats->dir)
-		return -ENODEV;
+	if (!stats->dir) {
+		ret = -ENODEV;
+		goto out;
+	}
 	debugfs_create_u32("log_level", 0600, stats->dir, &stats->debug);
 	debugfs_create_file("tx", 0400, stats->dir, &stats->tx, &counter_ops);
 	debugfs_create_file("rx", 0400, stats->dir, &stats->rx, &counter_ops);
-	return 0;
+out:
+	rcu_read_unlock();
+	return ret;
 }
 
 int tp_monitor_init(struct tp_monitor_stats *stats)

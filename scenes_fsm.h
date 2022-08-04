@@ -34,6 +34,11 @@ enum {
 	FSM_STATE_MAX
 };
 
+enum {
+	SCENE_TEST_SET_PARAM,
+	SCENE_TEST_MAX,
+};
+
 struct wlan_state_condition {
 	u32 scene;
 	u32 ac_mask;
@@ -56,10 +61,17 @@ struct wlan_scene_event {
 struct wlan_ptracker_fsm {
 	int reset_cnt;
 	bool confirm;
+	bool thread_run;
 	struct completion event;
 	struct wlan_scene_event msg;
 	struct task_struct *fsm_thread;
 	const struct wlan_state_condition *conditions;
+	/* debug usage */
+	struct dentry *dir;
+	u32 state;
+	u32 min_tput;
+	u32 max_tput;
+	u32 ac_mask;
 };
 
 extern int scenes_fsm_init(struct wlan_ptracker_fsm *fsm);

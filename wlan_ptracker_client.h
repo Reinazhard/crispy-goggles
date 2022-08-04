@@ -18,9 +18,15 @@ enum {
 	WLAN_PTRACKER_NOTIFY_SCENE_CHANGE,
 	WLAN_PTRACKER_NOTIFY_SCENE_CHANGE_PREPARE,
 	WLAN_PTRACKER_NOTIFY_SUSPEND,
-	WLAN_PTRACKER_NOTIFY_STA_CHANGE,
+	WLAN_PTRACKER_NOTIFY_STA_CONNECT,
+	WLAN_PTRACKER_NOTIFY_STA_DISCONNECT,
+	WLAN_PTRACKER_NOTIFY_DYTWT_ENABLE,
+	WLAN_PTRACKER_NOTIFY_DYTWT_DISABLE,
 	WLAN_PTRACKER_NOTIFY_MAX,
 };
+
+/* backword compatible */
+#define WLAN_PTRACKER_NOTIFY_SUSPEN WLAN_PTRACKER_NOTIFY_SUSPEND
 
 struct wlan_ptracker_client {
 	void *priv;
@@ -34,4 +40,3 @@ extern int wlan_ptracker_register_client(struct wlan_ptracker_client *client);
 extern void wlan_ptracker_unregister_client(struct wlan_ptracker_client *client);
 
 #endif /*__WLAN_PTRACKER_CLIENT_H*/
-

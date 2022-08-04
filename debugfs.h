@@ -30,6 +30,11 @@ enum {
 	ACTION_MAX,
 };
 
+struct scene_statistic {
+	u64 awake;
+	u64 asleep;
+};
+
 struct history_entry {
 	u32 state;
 	bool valid;
