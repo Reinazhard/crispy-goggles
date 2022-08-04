@@ -82,7 +82,9 @@ int wlan_ptracker_register_client(struct wlan_ptracker_client *client)
 	struct wlan_ptracker_core *core = get_core();
 
 	if (!core->client) {
-		core->client = client;
+		rcu_read_lock();
+		rcu_assign_pointer(core->client, client);
+		rcu_read_unlock();
 		client->cb = client_event_handler;
 	}
 	return 0;
@@ -95,7 +97,9 @@ void wlan_ptracker_unregister_client(struct wlan_ptracker_client *client)
 
 	if (core->client == client) {
 		client->cb = NULL;
-		core->client = NULL;
+		rcu_read_lock();
+		rcu_assign_pointer(core->client, NULL);
+		rcu_read_unlock();
 	}
 }
 EXPORT_SYMBOL_GPL(wlan_ptracker_unregister_client);

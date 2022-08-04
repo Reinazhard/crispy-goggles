@@ -6,12 +6,12 @@
  *
  * Author: Star Chang <starchang@google.com>
  */
+#include <linux/debugfs.h>
 #include "core.h"
 
-#define fsm_to_core(fsm) \
-	(container_of(fsm, struct wlan_ptracker_core, fsm))
+#define fsm_to_core(fsm) (container_of(fsm, struct wlan_ptracker_core, fsm))
 
-static const struct wlan_state_condition conditions[FSM_STATE_MAX] = {
+static struct wlan_state_condition conditions[FSM_STATE_MAX] = {
 	{
 		.scene = WLAN_SCENE_IDLE,
 		.ac_mask = WMM_AC_ALL_MASK,
@@ -22,14 +22,13 @@ static const struct wlan_state_condition conditions[FSM_STATE_MAX] = {
 		.scene = WLAN_SCENE_WEB,
 		.ac_mask = WMM_AC_ALL_MASK,
 		.min_tp_threshold = 1000,
-		.max_tp_threshold = 10000,
+		.max_tp_threshold = 9000,
 	},
 	{
 		.scene = WLAN_SCENE_YOUTUBE,
 		.ac_mask = WMM_AC_ALL_MASK,
-		/* Total >= 10 Mbps && < 50 Mbps */
-		.min_tp_threshold = 10000,
-		.max_tp_threshold = 50000,
+		.min_tp_threshold = 9000,
+		.max_tp_threshold = 60000,
 	},
 	{
 		.scene = WLAN_SCENE_LOW_LATENCY,
@@ -41,8 +40,7 @@ static const struct wlan_state_condition conditions[FSM_STATE_MAX] = {
 	{
 		.scene = WLAN_SCENE_TPUT,
 		.ac_mask = WMM_AC_ALL_MASK,
-		/* Total >= 50 Mbps */
-		.min_tp_threshold = 50000,
+		.min_tp_threshold = 60000,
 		.max_tp_threshold = __INT_MAX__,
 	},
 };
@@ -53,7 +51,7 @@ static int fsm_thread(void *param)
 	struct wlan_scene_event *msg = &fsm->msg;
 	struct wlan_ptracker_core *core = fsm_to_core(fsm);
 
-	while (1) {
+	while (fsm->thread_run) {
 		set_current_state(TASK_INTERRUPTIBLE);
 		if (kthread_should_stop()) {
 			ptracker_info(core, "kthread is stopped\n");
@@ -61,26 +59,14 @@ static int fsm_thread(void *param)
 		}
 		wait_for_completion(&fsm->event);
 		ptracker_dbg(core, "state: %d, trans state %d -> %d, rate %llu\n",
-					  msg->state, msg->src, msg->dst, msg->rate);
-
-		/*
-		 * Request twice of transmit events are happing then trans state,
-		 * to make sure the state is stable enough.
-		 * first time: confirm is false, send prepare first.
-		 * (ex: twt can tear down original setup first)
-		 * second time: confirm is true and change the state to dst.
-		 */
-		if (fsm->confirm) {
-			wlan_ptracker_call_chain(&core->notifier,
-			WLAN_PTRACKER_NOTIFY_SCENE_CHANGE, core);
-			msg->state = msg->dst;
-			fsm->confirm = false;
-		} else {
-			/* call notifier chain */
-			wlan_ptracker_call_chain(&core->notifier,
+			msg->state, msg->src, msg->dst, msg->rate);
+		wlan_ptracker_call_chain(&core->notifier,
 			WLAN_PTRACKER_NOTIFY_SCENE_CHANGE_PREPARE, core);
-			fsm->confirm = true;
-		}
+		fsm->confirm = true;
+		wlan_ptracker_call_chain(&core->notifier,
+			WLAN_PTRACKER_NOTIFY_SCENE_CHANGE, core);
+		msg->state = msg->dst;
+		fsm->confirm = false;
 	}
 	return 0;
 }
@@ -149,15 +135,20 @@ static void scenes_fsm_decision(struct wlan_ptracker_core *core, u32 type)
 	/* reset check */
 	if (type == WLAN_PTRACKER_NOTIFY_SUSPEND) {
 		fsm->reset_cnt++;
-		except = !(fsm->reset_cnt % RESET_THRESHOLD);
+		except = (fsm->reset_cnt >= RESET_THRESHOLD) ? true : false;
 	}
 
 	/* check state isn't change and not first time do nothing */
-	if (new_state == msg->state && type != WLAN_PTRACKER_NOTIFY_STA_CHANGE)
+	if (new_state == msg->state &&
+		type != WLAN_PTRACKER_NOTIFY_STA_CONNECT)
 		return;
 	/* new state must higher then current state */
-	if (new_state < msg->state && !except)
+	if (new_state < msg->state && !except) {
+		ptracker_dbg(core,
+			"state not change since new state %d < old state %d and reset_cnt is %d\n",
+			new_state, msg->state, fsm->reset_cnt);
 		return;
+	}
 
 	ptracker_dbg(core, "type %d, reset_cnt %d, %d -> %d\n",
 				  type, fsm->reset_cnt, msg->state, new_state);
@@ -180,6 +171,7 @@ static int scene_notifier_handler(struct notifier_block *nb,
 {
 	struct wlan_ptracker_core *core = ptr;
 	struct wlan_ptracker_notifier *notifier = &core->notifier;
+	struct wlan_ptracker_fsm *fsm = &core->fsm;
 
 	/*
 	 * Events of suspen and sta change will block wlan driver
@@ -187,11 +179,14 @@ static int scene_notifier_handler(struct notifier_block *nb,
 	 */
 	switch (event) {
 	case WLAN_PTRACKER_NOTIFY_SUSPEND:
+#ifdef TP_DEBUG
 		ptracker_dbg(core, "update time (%d)\n",
 			jiffies_to_msecs(jiffies - notifier->prev_event));
+#endif
 		notifier->prev_event = jiffies;
-	case WLAN_PTRACKER_NOTIFY_STA_CHANGE:
+	case WLAN_PTRACKER_NOTIFY_STA_CONNECT:
 	case WLAN_PTRACKER_NOTIFY_TP:
+		fsm->confirm = true;
 		scenes_fsm_decision(core, event);
 		break;
 	default:
@@ -204,6 +199,107 @@ static struct notifier_block scene_nb = {
 	.priority = 0,
 	.notifier_call = scene_notifier_handler,
 };
+
+static int scene_cond_set(struct wlan_ptracker_fsm *fsm)
+{
+	struct wlan_state_condition *param = &conditions[fsm->state];
+
+	param->ac_mask = fsm->ac_mask;
+	param->max_tp_threshold = fsm->max_tput;
+	param->min_tp_threshold = fsm->min_tput;
+	return 0;
+}
+
+static int scene_debugfs_action(struct wlan_ptracker_core *core, u32 action)
+{
+	struct wlan_ptracker_fsm *fsm = &core->fsm;
+	switch (action) {
+	case SCENE_TEST_SET_PARAM:
+		scene_cond_set(fsm);
+		break;
+	default:
+		ptracker_err(core, "action %d is not supported\n", action);
+		break;
+	}
+	return 0;
+}
+
+static ssize_t scene_params_write(struct file *file,
+	const char __user *buf, size_t len, loff_t *ppos)
+{
+	struct wlan_ptracker_core *core = file->private_data;
+	u32 action;
+
+	if (kstrtouint_from_user(buf, len, 10, &action))
+		return -EFAULT;
+
+	/* active action */
+	scene_debugfs_action(core, action);
+	return 0;
+}
+
+static int _scene_params_read(char *buf, int len)
+{
+	struct wlan_state_condition *param;
+	int count = 0;
+	int i;
+
+	count += scnprintf(buf + count, len - count,
+			"===================\n");
+	for (i = 0 ; i < FSM_STATE_MAX; i++) {
+		param = &conditions[i];
+		count += scnprintf(buf + count, len - count,
+			"state: %d, ac_mask: %#0X\n", i, param->ac_mask);
+		count += scnprintf(buf + count, len - count,
+			"min_tp_threshold: %u\n", param->min_tp_threshold);
+		count += scnprintf(buf + count, len - count,
+			"max_tp_threshold: %u\n", param->max_tp_threshold);
+		count += scnprintf(buf + count, len - count,
+			"===================\n");
+	}
+	return count;
+}
+
+#define SCENE_PARAM_BUF_SIZE 1024
+static ssize_t scene_params_read(struct file *file, char __user *userbuf,
+	size_t count, loff_t *ppos)
+{
+	char *buf;
+	int len;
+	int ret;
+
+	buf = vmalloc(SCENE_PARAM_BUF_SIZE);
+	if (!buf)
+		return -ENOMEM;
+	len = _scene_params_read(buf, SCENE_PARAM_BUF_SIZE);
+	ret = simple_read_from_buffer(userbuf, count, ppos, buf, len);
+	vfree(buf);
+	return ret;
+}
+
+static const struct file_operations scene_params_ops = {
+	.open = simple_open,
+	.read = scene_params_read,
+	.write = scene_params_write,
+	.llseek = generic_file_llseek,
+};
+
+static int scene_debugfs_init(struct wlan_ptracker_core *core)
+{
+	struct wlan_ptracker_debugfs *debugfs = &core->debugfs;
+	struct wlan_ptracker_fsm *fsm = &core->fsm;
+
+	fsm->dir = debugfs_create_dir("scene", debugfs->root);
+	if (!fsm->dir)
+		return -ENODEV;
+
+	debugfs_create_file("scene_params", 0600, fsm->dir, core, &scene_params_ops);
+	debugfs_create_u32("state", 0600, fsm->dir, &fsm->state);
+	debugfs_create_u32("min_tput", 0600, fsm->dir, &fsm->min_tput);
+	debugfs_create_u32("max_tput", 0600, fsm->dir, &fsm->max_tput);
+	debugfs_create_u32("ac_mask", 0600, fsm->dir, &fsm->ac_mask);
+	return 0;
+}
 
 int scenes_fsm_init(struct wlan_ptracker_fsm *fsm)
 {
@@ -221,6 +317,7 @@ int scenes_fsm_init(struct wlan_ptracker_fsm *fsm)
 	msg->src = WLAN_SCENE_IDLE;
 	msg->state = WLAN_SCENE_IDLE;
 	mutex_init(&msg->lock);
+	scene_debugfs_init(core);
 
 	/*scene event notifier handler from client */
 	ret = wlan_ptracker_register_notifier(&core->notifier, &scene_nb);
@@ -236,6 +333,7 @@ int scenes_fsm_init(struct wlan_ptracker_fsm *fsm)
 		ptracker_err(core, "unable to start kernel thread %d\n", ret);
 		return ret;
 	}
+	fsm->thread_run = true;
 	wake_up_process(fsm->fsm_thread);
 	return 0;
 }
@@ -244,15 +342,18 @@ void scenes_fsm_exit(struct wlan_ptracker_fsm *fsm)
 {
 	struct wlan_ptracker_core *core = fsm_to_core(fsm);
 
+	if (fsm->dir)
+		debugfs_remove_recursive(fsm->dir);
+
 	wlan_ptracker_unregister_notifier(&core->notifier, &scene_nb);
+	fsm->thread_run = false;
+	complete(&fsm->event);
 	if (fsm->fsm_thread) {
 		int ret = kthread_stop(fsm->fsm_thread);
 		fsm->fsm_thread = NULL;
 		if (ret)
 			ptracker_err(core, "stop thread fail: %d\n", ret);
 	}
-	complete(&fsm->event);
 	fsm->conditions = NULL;
 	fsm->reset_cnt = 0;
 }
-

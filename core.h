@@ -29,7 +29,7 @@ struct wlan_ptracker_core {
 	struct wlan_ptracker_debugfs debugfs;
 	struct wlan_ptracker_fsm fsm;
 	struct net_device *dev;
-	struct wlan_ptracker_client *client;
+	struct wlan_ptracker_client __rcu *client;
 	u8 dscp_to_ac[DSCP_MAX];
 };
 #endif /* _WLAN_PTRACKER_CORE_H */

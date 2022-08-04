@@ -29,6 +29,10 @@ struct tp_monitor_counts {
 	u64 pre_packet_cnt;
 	u64 rate;
 	u64 pps;
+	u64 max_pps;
+	u64 max_packet_cnt;
+	u64 max_packet_bytes;
+	u64 max_rate;
 };
 
 struct tp_monitor_stats {
