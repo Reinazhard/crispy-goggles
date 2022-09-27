@@ -85,6 +85,20 @@ static const struct file_operations dscp_ops = {
 	.llseek = generic_file_llseek,
 };
 
+static int wlan_ptracker_sysfs_init(struct wlan_ptracker_debugfs *debugfs)
+{
+	debugfs->kobj = kobject_create_and_add("wlan_ptracker", NULL);
+	if (!debugfs->kobj)
+		return -ENODEV;
+	return 0;
+}
+
+static void wlan_ptracker_sysfs_exit(struct wlan_ptracker_debugfs *debugfs)
+{
+	if (debugfs->kobj)
+		kobject_put(debugfs->kobj);
+}
+
 int wlan_ptracker_debugfs_init(struct wlan_ptracker_debugfs *debugfs)
 {
 	struct wlan_ptracker_core *core = container_of(
@@ -96,6 +110,7 @@ int wlan_ptracker_debugfs_init(struct wlan_ptracker_debugfs *debugfs)
 	debugfs_create_file("action", 0600, debugfs->root, core, &dscp_ops);
 	debugfs_create_u32("dscp", 0600, debugfs->root, &debugfs->dscp);
 	debugfs_create_u32("ac", 0600, debugfs->root, &debugfs->ac);
+	wlan_ptracker_sysfs_init(debugfs);
 	return 0;
 }
 
@@ -103,6 +118,7 @@ void wlan_ptracker_debugfs_exit(struct wlan_ptracker_debugfs *debugfs)
 {
 	debugfs_remove_recursive(debugfs->root);
 	debugfs->root = NULL;
+	wlan_ptracker_sysfs_exit(debugfs);
 }
 
 struct history_manager *wlan_ptracker_history_create(int entry_count, int entry_size)
@@ -179,14 +195,13 @@ size_t wlan_ptracker_history_read(struct history_manager *hm, char *buf, int buf
 		cur = (struct history_entry *) ptr;
 		if (!cur->valid)
 			break;
-		j = (i + hm->entry_count + 1) % hm->entry_count;
+		j = (i + 1) % hm->entry_count;
 		next = (struct history_entry *)(hm->entries + (j * hm->entry_size));
 		len += scnprintf(buf + len, buf_len - len, "%02d: ", i);
 		len += history_get_tm(cur, buf + len, buf_len - len);
 		len += scnprintf(buf + len, buf_len - len, "%12s =>", state2str[cur->state]);
 		if (hm->priv_read)
-			len += hm->priv_read(cur, next->valid ? next : NULL, buf + len,
-				buf_len - len);
+			len += hm->priv_read(cur, next, buf + len, buf_len - len);
 		len += scnprintf(buf + len, buf_len - len, "\n");
 		ptr += hm->entry_size;
 	}

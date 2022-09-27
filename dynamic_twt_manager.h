@@ -35,6 +35,17 @@ struct dytwt_pwr_state {
 	u64 count;
 };
 
+struct dytwt_status {
+	u32 config_id;
+	u32 flow_id;
+	u32 flow_flags;
+	u32 setup_cmd;
+	u32 channel;
+	u32 nego_type;
+	u32 wake_dur;
+	u32 wake_int;
+};
+
 struct dytwt_stats {
 	u32 config_id;
 	u32 sp_seq;		/* sequence number of the service period */
@@ -60,6 +71,7 @@ struct dytwt_client_ops {
 	int (*get_cap)(void *priv, struct dytwt_cap *cap);
 	int (*get_pwrstates)(void *priv, struct dytwt_pwr_state *state);
 	int (*get_stats)(void *priv, struct dytwt_stats *stats);
+	int (*get_status)(void *priv, struct dytwt_status *status);
 };
 
 enum {
@@ -75,6 +87,7 @@ enum {
 	TWT_TEST_ONOFF,
 	TWT_TEST_SET_PARAM,
 	TWT_TEST_DUMP_STATS,
+	TWT_TEST_DUMP_STATUS,
 	TWT_TEST_MAX,
 };
 
@@ -116,6 +129,7 @@ struct dytwt_manager {
 	struct history_manager *hm;
 	u32 rssi_threshold;
 	u32 link_threshold;
+	bool twt_cap;
 	struct delayed_work wq;
 	struct delayed_work setup_wq;
 	struct wlan_ptracker_core *core;
@@ -125,5 +139,4 @@ struct dytwt_manager {
 
 extern int dytwt_init(struct wlan_ptracker_core *core);
 extern void dytwt_exit(struct wlan_ptracker_core *core);
-
 #endif /* __TP_TRACKER_DYNAMIC_TWT_SETUP_H */

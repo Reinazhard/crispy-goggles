@@ -11,9 +11,12 @@
 #include <linux/types.h>
 #include <linux/mutex.h>
 #include <linux/time64.h>
+#include <linux/sysfs.h>
+#include <linux/kobject.h>
 
 struct wlan_ptracker_debugfs {
 	struct dentry *root;
+	struct kobject *kobj;
 	u32 dscp;
 	u32 ac;
 	u32 action;

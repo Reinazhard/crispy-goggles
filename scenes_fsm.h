@@ -60,7 +60,6 @@ struct wlan_scene_event {
 
 struct wlan_ptracker_fsm {
 	int reset_cnt;
-	bool confirm;
 	bool thread_run;
 	struct completion event;
 	struct wlan_scene_event msg;
@@ -76,5 +75,4 @@ struct wlan_ptracker_fsm {
 
 extern int scenes_fsm_init(struct wlan_ptracker_fsm *fsm);
 extern void scenes_fsm_exit(struct wlan_ptracker_fsm *fsm);
-
 #endif /* __WLAN_SCENES_FSM_H */
