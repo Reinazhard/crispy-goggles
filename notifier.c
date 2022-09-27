@@ -18,16 +18,20 @@ static int up_event_handler(struct wlan_ptracker_core *core, struct net_device *
 {
 	core->dev = dev;
 	core->client->core = core;
+	dev_hold(dev);
 	core->client->priv = dev;
 	return tp_monitor_init(&core->tp);
 }
 
 static void down_event_handler(struct wlan_ptracker_core *core)
 {
+	struct net_device *dev = core->dev;
 	tp_monitor_exit(&core->tp);
 	core->dev = NULL;
 	core->client->core = NULL;
 	core->client->priv = NULL;
+	if (dev)
+		dev_put(dev);
 }
 
 static int netdevice_notifier_handler(struct notifier_block *nb,

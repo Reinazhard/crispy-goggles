@@ -58,15 +58,12 @@ static int fsm_thread(void *param)
 			break;
 		}
 		wait_for_completion(&fsm->event);
+
 		ptracker_dbg(core, "state: %d, trans state %d -> %d, rate %llu\n",
 			msg->state, msg->src, msg->dst, msg->rate);
-		wlan_ptracker_call_chain(&core->notifier,
-			WLAN_PTRACKER_NOTIFY_SCENE_CHANGE_PREPARE, core);
-		fsm->confirm = true;
-		wlan_ptracker_call_chain(&core->notifier,
-			WLAN_PTRACKER_NOTIFY_SCENE_CHANGE, core);
+		wlan_ptracker_call_chain(&core->notifier, WLAN_PTRACKER_NOTIFY_SCENE_CHANGE_PREPARE, core);
+		wlan_ptracker_call_chain(&core->notifier, WLAN_PTRACKER_NOTIFY_SCENE_CHANGE, core);
 		msg->state = msg->dst;
-		fsm->confirm = false;
 	}
 	return 0;
 }
@@ -171,7 +168,6 @@ static int scene_notifier_handler(struct notifier_block *nb,
 {
 	struct wlan_ptracker_core *core = ptr;
 	struct wlan_ptracker_notifier *notifier = &core->notifier;
-	struct wlan_ptracker_fsm *fsm = &core->fsm;
 
 	/*
 	 * Events of suspen and sta change will block wlan driver
@@ -186,7 +182,6 @@ static int scene_notifier_handler(struct notifier_block *nb,
 		notifier->prev_event = jiffies;
 	case WLAN_PTRACKER_NOTIFY_STA_CONNECT:
 	case WLAN_PTRACKER_NOTIFY_TP:
-		fsm->confirm = true;
 		scenes_fsm_decision(core, event);
 		break;
 	default:
@@ -310,8 +305,6 @@ int scenes_fsm_init(struct wlan_ptracker_fsm *fsm)
 	/* assign scenes and conditions */
 	fsm->conditions = &conditions[0];
 	fsm->reset_cnt = 0;
-	/* for first link up setting */
-	fsm->confirm = true;
 	/* init msg for receiving event */
 	msg->dst = WLAN_SCENE_IDLE;
 	msg->src = WLAN_SCENE_IDLE;
