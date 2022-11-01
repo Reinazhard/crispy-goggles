@@ -14,13 +14,21 @@
 #include <linux/sysfs.h>
 #include <linux/kobject.h>
 
+struct wlan_ptracker_core;
+
 struct wlan_ptracker_debugfs {
 	struct dentry *root;
-	struct kobject *kobj;
+	struct kobject kobj;
 	u32 dscp;
 	u32 ac;
 	u32 action;
 	u32 log_level;
+};
+
+struct ptracker_kobj_attr {
+	struct attribute attr;
+	ssize_t (*show)(struct wlan_ptracker_debugfs *, char *);
+	ssize_t (*store)(struct wlan_ptracker_debugfs *, const char *, size_t count);
 };
 
 enum {
@@ -52,7 +60,7 @@ struct history_manager {
 	int entry_count;
 	int entry_size;
 	struct mutex mutex;
-	int (*priv_read)(void *cur, void *next, char *buf, int len);
+	int (*priv_read)(struct wlan_ptracker_core *core, void *cur, void *next, char *buf, int len);
 	u8 entries[0];
 };
 
@@ -61,6 +69,7 @@ extern void wlan_ptracker_debugfs_exit(struct wlan_ptracker_debugfs *debugfs);
 extern struct history_manager *wlan_ptracker_history_create(int entry_count, int entry_size);
 extern void wlan_ptracker_history_destroy(struct history_manager *hm);
 extern void *wlan_ptracker_history_store(struct history_manager *hm, u32 state);
-extern size_t wlan_ptracker_history_read(struct history_manager *hm, char *buf, int len);
+extern size_t wlan_ptracker_history_read(struct wlan_ptracker_core *core,
+	struct history_manager *hm, char *buf, int len);
 
 #endif  /* _WLAN_PTRACKER_DEBUGFS_H */

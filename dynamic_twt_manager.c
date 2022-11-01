@@ -11,10 +11,6 @@
 #include <linux/delay.h>
 #include "core.h"
 
-static struct dytwt_manager dytwt_mgmt;
-
-#define  dytwt_get_manager()  (&dytwt_mgmt)
-
 #define DYMAIC_TWT_CONFIG_ID    3
 
 /* for tcp one pair case */
@@ -134,7 +130,8 @@ static int dytwt_client_twt_teardown(struct wlan_ptracker_client *client, u32 st
 static bool dytwt_client_twt_cap(struct wlan_ptracker_client *client)
 {
 	struct dytwt_cap param;
-	struct dytwt_manager *dytwt = dytwt_get_manager();
+	struct wlan_ptracker_core *core = client->core;
+	struct dytwt_manager *dytwt = core->dytwt;
 	int ret;
 
 	if (!client->dytwt_ops || !client->priv)
@@ -145,13 +142,13 @@ static bool dytwt_client_twt_cap(struct wlan_ptracker_client *client)
 
 	ret = client->dytwt_ops->get_cap(client->priv, &param);
 
-	ptracker_dbg(dytwt->core, "%d, %d, %d, %d\n", param.device_cap, param.peer_cap,
+	ptracker_dbg(core, "%d, %d, %d, %d\n", param.device_cap, param.peer_cap,
 		param.link_speed, param.rssi);
 	if (ret)
 		return false;
 
 	if (!param.peer_cap || !param.device_cap) {
-		ptracker_err(dytwt->core, "dytwt is not enabled due to capability: %d, %d\n",
+		ptracker_err(core, "dytwt is not enabled due to capability: %d, %d\n",
 			param.device_cap, param.peer_cap);
 		return false;
 	}
@@ -215,11 +212,11 @@ static inline void dytwt_record_get_pwr(u64 asleep, u64 awake, u64 *total, int *
 	*total /= 10;
 }
 
-static int dytwt_record_priv_read(void *cur, void *next, char *buf, int len)
+static int dytwt_record_priv_read(struct wlan_ptracker_core *core, void *cur, void *next,
+	char *buf, int len)
 {
 	struct dytwt_entry *c = cur;
 	struct dytwt_entry *n = next;
-	struct dytwt_manager *dytwt = dytwt_get_manager();
 	int period_percent, total_percent;
 	u64 period_time, total_time;
 	u64 awake, asleep;
@@ -227,7 +224,7 @@ static int dytwt_record_priv_read(void *cur, void *next, char *buf, int len)
 	/* next is the current state */
 	if (n->pwr.asleep < c->pwr.asleep) {
 		struct dytwt_pwr_state pwr;
-		dytwt_client_twt_pwrstates(dytwt->core->client, &pwr);
+		dytwt_client_twt_pwrstates(core->client, &pwr);
 		awake = pwr.awake - c->pwr.awake;
 		asleep = pwr.asleep - c->pwr.asleep;
 		/* get total */
@@ -317,29 +314,24 @@ out:
 
 static void dytwt_delay_setup(struct work_struct *work)
 {
-	struct dytwt_manager *dytwt = dytwt_get_manager();
+	struct dytwt_manager *dytwt = container_of(work, struct dytwt_manager, setup_wq.work);
 	struct wlan_ptracker_core *core = dytwt->core;
 	struct wlan_ptracker_client *client;
 
 	if (!core)
 		return;
 
-	rcu_read_lock();
-	client = rcu_dereference(core->client);
-	if (!client)
-		goto end;
+	client = core->client;
 	/* for first time update value is required*/
 	dytwt->twt_cap = dytwt_client_twt_cap(client);
 	_dytwt_scene_change_handler(dytwt, client);
-end:
-	rcu_read_unlock();
 }
 
 #define TWT_WAIT_STA_READY_TIME 2000
 static int dytwt_scene_change_handler(struct wlan_ptracker_client *client)
 {
-	struct dytwt_manager *dytwt = dytwt_get_manager();
 	struct wlan_ptracker_core *core = client->core;
+	struct dytwt_manager *dytwt = core->dytwt;
 	struct wlan_scene_event *msg = &core->fsm.msg;
 
 	if (msg->reason == WLAN_PTRACKER_NOTIFY_STA_CONNECT)
@@ -352,7 +344,8 @@ static int dytwt_scene_change_handler(struct wlan_ptracker_client *client)
 #define TWT_HISTORY_BUF_SIZE 10240
 static ssize_t twt_read(struct file *file, char __user *userbuf, size_t count, loff_t *ppos)
 {
-	struct dytwt_manager *dytwt = dytwt_get_manager();
+	struct wlan_ptracker_core *core = file->private_data;
+	struct dytwt_manager *dytwt = core->dytwt;
 	char *buf;
 	int len;
 	ssize_t ret;
@@ -362,7 +355,7 @@ static ssize_t twt_read(struct file *file, char __user *userbuf, size_t count, l
 	if (!buf)
 		return -ENOMEM;
 
-	len = wlan_ptracker_history_read(dytwt->hm, buf, TWT_HISTORY_BUF_SIZE);
+	len = wlan_ptracker_history_read(core, dytwt->hm, buf, TWT_HISTORY_BUF_SIZE);
 	ret = simple_read_from_buffer(userbuf, count, ppos, buf, len);
 	vfree(buf);
 	return ret;
@@ -401,7 +394,8 @@ static void dytwt_force_twt_setup(struct wlan_ptracker_client *client, struct dy
 
 static inline void twt_enable(struct wlan_ptracker_client *client, bool enable, u32 reason)
 {
-	struct dytwt_manager *dytwt = dytwt_get_manager();
+	struct wlan_ptracker_core *core = client->core;
+	struct dytwt_manager *dytwt = core->dytwt;
 
 	if (enable) {
 		dytwt->feature_flag |= BIT(FEATURE_FLAG_TWT);
@@ -416,7 +410,7 @@ static inline void twt_enable(struct wlan_ptracker_client *client, bool enable, 
 #define DYTWT_RUNTIME_TIMER 2000
 static void dytwt_runtime(struct work_struct *work)
 {
-	struct dytwt_manager *dytwt = dytwt_get_manager();
+	struct dytwt_manager *dytwt = container_of(work, struct dytwt_manager, wq.work);
 	struct dytwt_scene_action *act;
 	struct wlan_ptracker_client *client;
 
@@ -426,12 +420,7 @@ static void dytwt_runtime(struct work_struct *work)
 	if (dytwt->prev == WLAN_SCENE_MAX)
 		goto end;
 
-	rcu_read_lock();
-	client = rcu_dereference(dytwt->core->client);
-
-	if (!client)
-		goto unlock;
-
+	client = dytwt->core->client;
 	act = &dytwt_actions[dytwt->prev];
 	/* update twt_cap periodically */
 	dytwt->twt_cap = dytwt_client_twt_cap(client);
@@ -440,8 +429,6 @@ static void dytwt_runtime(struct work_struct *work)
 		ptracker_dbg(dytwt->core, "teardown twt due to hit threshold\n");
 		dytwt_force_twt_setup(client, dytwt, TWT_SETUP_REASON_RUNTIME);
 	}
-unlock:
-	rcu_read_unlock();
 end:
 	schedule_delayed_work(&dytwt->wq, msecs_to_jiffies(DYTWT_RUNTIME_TIMER));
 }
@@ -505,14 +492,8 @@ static void dytwt_status_dump(struct wlan_ptracker_client *client, struct dytwt_
 static int dytwt_debugfs_action(struct wlan_ptracker_core *core, u32 action)
 {
 	struct dytwt_pwr_state pwr_state;
-	struct dytwt_manager *dytwt = dytwt_get_manager();
-	struct wlan_ptracker_client *client;
-
-	rcu_read_lock();
-	client = rcu_dereference(core->client);
-
-	if (!client)
-		goto unlock;
+	struct dytwt_manager *dytwt = core->dytwt;
+	struct wlan_ptracker_client *client = core->client;
 
 	switch (action) {
 	case TWT_TEST_FORCE_STATE:
@@ -537,11 +518,9 @@ static int dytwt_debugfs_action(struct wlan_ptracker_core *core, u32 action)
 		dytwt_status_dump(client, dytwt);
 		break;
 	default:
-		ptracker_err(core, "action %d is not supported!\n", action);
+		ptracker_err(core, "action %d is not supported\n", action);
 		return -ENOTSUPP;
 	}
-unlock:
-	rcu_read_unlock();
 	return 0;
 }
 
@@ -554,7 +533,8 @@ static ssize_t twt_params_write(struct file *file, const char __user *buf, size_
 	if (kstrtouint_from_user(buf, len, 10, &action))
 		return -EFAULT;
 
-	return dytwt_debugfs_action(core, action);
+	dytwt_debugfs_action(core, action);
+	return len;
 }
 
 static int dytwt_params_read(char *buf, int len)
@@ -607,9 +587,9 @@ static const struct file_operations twt_params_ops = {
 	.llseek = generic_file_llseek,
 };
 
-static int dytwt_statistic_read(char *buf, int len)
+static int dytwt_statistic_read(struct wlan_ptracker_core *core, char *buf, int len)
 {
-	struct dytwt_manager *dytwt = dytwt_get_manager();
+	struct dytwt_manager *dytwt = core->dytwt;
 	struct dytwt_counters *counter = &dytwt->counters;
 	struct dytwt_statistic *ds;
 	struct dytwt_pwr_state pwr;
@@ -648,6 +628,7 @@ static int dytwt_statistic_read(char *buf, int len)
 static ssize_t twt_statistic_read(struct file *file, char __user *userbuf, size_t count,
 	loff_t *ppos)
 {
+	struct wlan_ptracker_core *core = file->private_data;
 	char *buf;
 	int len;
 	int ret;
@@ -656,7 +637,7 @@ static ssize_t twt_statistic_read(struct file *file, char __user *userbuf, size_
 	if (!buf)
 		return -ENOMEM;
 
-	len = dytwt_statistic_read(buf, TWT_STATISTIC_SIZE);
+	len = dytwt_statistic_read(core, buf, TWT_STATISTIC_SIZE);
 	ret = simple_read_from_buffer(userbuf, count, ppos, buf, len);
 	vfree(buf);
 	return ret;
@@ -670,7 +651,8 @@ static const struct file_operations twt_statistic_ops = {
 
 static void dytwt_scene_change_prepare_handler(struct wlan_ptracker_client *client)
 {
-	struct dytwt_manager *dytwt = dytwt_get_manager();
+	struct wlan_ptracker_core *core = client->core;
+	struct dytwt_manager *dytwt = core->dytwt;
 	u32 prev_state = dytwt->prev;
 
 	if (!(dytwt->feature_flag & BIT(FEATURE_FLAG_TWT)))
@@ -687,13 +669,8 @@ static void dytwt_scene_change_prepare_handler(struct wlan_ptracker_client *clie
 static int dytwt_notifier_handler(struct notifier_block *nb, unsigned long event, void *ptr)
 {
 	struct wlan_ptracker_core *core = ptr;
-	struct wlan_ptracker_client *client;
-	struct dytwt_manager *dytwt = dytwt_get_manager();
-
-	rcu_read_lock();
-	client = rcu_dereference(core->client);
-	if (!client)
-		goto unlock;
+	struct wlan_ptracker_client *client = core->client;
+	struct dytwt_manager *dytwt = core->dytwt;
 
 	switch (event) {
 	case WLAN_PTRACKER_NOTIFY_SCENE_CHANGE:
@@ -717,29 +694,24 @@ static int dytwt_notifier_handler(struct notifier_block *nb, unsigned long event
 	default:
 		break;
 	}
-unlock:
-	rcu_read_unlock();
 	return NOTIFY_OK;
 }
 
-static ssize_t dytwt_dumpstate_statistic(struct kobject *kobj, struct kobj_attribute *attr,
-	char *buf)
+static ssize_t dytwt_dumpstate_statistic(struct dytwt_manager *dytwt, char *buf)
 {
-	return dytwt_statistic_read(buf, PAGE_SIZE);
+	return dytwt_statistic_read(dytwt->core, buf, PAGE_SIZE);
 }
 
-static ssize_t dytwt_dumpstate_history(struct kobject *kobj, struct kobj_attribute *attr,
-	char *buf)
+static ssize_t dytwt_dumpstate_history(struct dytwt_manager *dytwt, char *buf)
 {
-	struct dytwt_manager *dytwt = dytwt_get_manager();
-	return wlan_ptracker_history_read(dytwt->hm, buf, PAGE_SIZE);
+	return wlan_ptracker_history_read(dytwt->core, dytwt->hm, buf, PAGE_SIZE);
 }
 
-static struct kobj_attribute attr_twt_history =
-	__ATTR(twt_history, 0664, dytwt_dumpstate_history, NULL);
+static struct dytwt_kobj_attr attr_twt_history =
+	__ATTR(history, 0664, dytwt_dumpstate_history, NULL);
 
-static struct kobj_attribute attr_twt_statistic =
-	__ATTR(twt_statistic, 0664, dytwt_dumpstate_statistic, NULL);
+static struct dytwt_kobj_attr attr_twt_statistic =
+	__ATTR(statistic, 0664, dytwt_dumpstate_statistic, NULL);
 
 static struct attribute *default_file_attrs[] = {
 	&attr_twt_history.attr,
@@ -747,14 +719,66 @@ static struct attribute *default_file_attrs[] = {
 	NULL,
 };
 
-static const struct attribute_group attr_group = {
-	.attrs = default_file_attrs,
+static ssize_t dytwt_sysfs_show(struct kobject *kobj, struct attribute *attr, char *buf)
+{
+	struct dytwt_manager *dytwt;
+	struct dytwt_kobj_attr *dytwt_attr;
+	int ret = -EIO;
+
+	dytwt = container_of(kobj, struct dytwt_manager, kobj);
+	dytwt_attr = container_of(attr, struct dytwt_kobj_attr, attr);
+
+	if (dytwt_attr->show)
+		ret = dytwt_attr->show(dytwt, buf);
+	return ret;
+}
+
+static ssize_t dytwt_sysfs_store(struct kobject *kobj, struct attribute *attr, const char *buf,
+	size_t count)
+{
+	struct dytwt_manager *dytwt;
+	struct dytwt_kobj_attr *dytwt_attr;
+	int ret = -EIO;
+
+	dytwt = container_of(kobj, struct dytwt_manager, kobj);
+	dytwt_attr = container_of(attr, struct dytwt_kobj_attr, attr);
+
+	if (dytwt_attr->show)
+		ret = dytwt_attr->store(dytwt, buf, count);
+	return ret;
+
+}
+
+static struct sysfs_ops dytwt_sysfs_ops = {
+	.show = dytwt_sysfs_show,
+	.store = dytwt_sysfs_store,
 };
+
+static struct kobj_type dytwt_ktype = {
+	.sysfs_ops = &dytwt_sysfs_ops,
+	.default_attrs = default_file_attrs,
+};
+
+static int dytwt_sysfs_init(struct dytwt_manager *dytwt, struct wlan_ptracker_debugfs *debugfs)
+{
+	int ret;
+
+	ret = kobject_init_and_add(&dytwt->kobj, &dytwt_ktype, &debugfs->kobj, "twt");
+	if (ret)
+		kobject_put(&dytwt->kobj);
+	return ret;
+}
+
+static void dytwt_sysfs_exit(struct dytwt_manager *dytwt)
+{
+	kobject_del(&dytwt->kobj);
+	kobject_put(&dytwt->kobj);
+}
 
 static int dytwt_debugfs_init(struct wlan_ptracker_core *core)
 {
 	struct wlan_ptracker_debugfs *debugfs = &core->debugfs;
-	struct dytwt_manager *dytwt = dytwt_get_manager();
+	struct dytwt_manager *dytwt = core->dytwt;
 	struct dytwt_scene_action *act = &dytwt_actions[WLAN_SCENE_MAX];
 
 	dytwt->feature_flag |= BIT(FEATURE_FLAG_TWT);
@@ -770,25 +794,28 @@ static int dytwt_debugfs_init(struct wlan_ptracker_core *core)
 	debugfs_create_u32("wake_duration", 0666, dytwt->dir, &act->param.wake_duration);
 	debugfs_create_u32("action", 0666, dytwt->dir, &act->action);
 	debugfs_create_u32("feature_flag", 0666, dytwt->dir, &dytwt->feature_flag);
-	if (debugfs->kobj)
-		sysfs_create_group(debugfs->kobj, &attr_group);
+	dytwt_sysfs_init(dytwt, debugfs);
 	return 0;
+}
+
+static void dytwt_debugfs_exit(struct dytwt_manager *dytwt)
+{
+	if (dytwt->dir)
+		debugfs_remove_recursive(dytwt->dir);
+	dytwt_sysfs_exit(dytwt);
 }
 
 #define TWT_DEFAULT_MIN_LINK_SPEED (180000)
 #define TWT_DEFAULT_MIN_RSSI (-70)
 #define DYTWT_RECORD_MAX 30
-static int dytwt_mgmt_init(struct wlan_ptracker_core *core)
+static struct dytwt_manager *dytwt_mgmt_init(struct wlan_ptracker_core *core)
 {
-	struct dytwt_manager *dytwt = dytwt_get_manager();
-	struct wlan_ptracker_debugfs *debugfs = &core->debugfs;
 	struct history_manager *hm;
+	struct dytwt_manager *dytwt = kzalloc(sizeof(struct dytwt_manager), GFP_KERNEL);
 
-	if (debugfs->kobj)
-		sysfs_remove_group(debugfs->kobj, &attr_group);
-	if (dytwt->dir)
-		debugfs_remove_recursive(dytwt->dir);
-	memset(dytwt, 0, sizeof(*dytwt));
+	if (!dytwt)
+		return NULL;
+
 	dytwt->state = WLAN_SCENE_IDLE;
 	dytwt->prev = WLAN_SCENE_MAX;
 	dytwt->core = core;
@@ -797,25 +824,23 @@ static int dytwt_mgmt_init(struct wlan_ptracker_core *core)
 	INIT_DELAYED_WORK(&dytwt->wq, dytwt_runtime);
 	INIT_DELAYED_WORK(&dytwt->setup_wq, dytwt_delay_setup);
 	hm =  wlan_ptracker_history_create(DYTWT_RECORD_MAX, sizeof(struct dytwt_entry));
-	if (!hm)
-		return -ENOMEM;
+	if (!hm) {
+		kfree(dytwt);
+		return NULL;
+	}
 	strncpy(hm->name, "Dynamic TWT Setup", sizeof(hm->name));
 	hm->priv_read = dytwt_record_priv_read;
 	dytwt->hm = hm;
-	return 0;
+
+	return dytwt;
 }
 
-static void dytwt_mgmt_exit(void)
+static void dytwt_mgmt_exit(struct dytwt_manager *dytwt)
 {
-	struct dytwt_manager *dytwt = dytwt_get_manager();
-
 	cancel_delayed_work_sync(&dytwt->wq);
 	cancel_delayed_work_sync(&dytwt->setup_wq);
-	if (dytwt->dir)
-		debugfs_remove_recursive(dytwt->dir);
-
 	wlan_ptracker_history_destroy(dytwt->hm);
-	memset(dytwt, 0, sizeof(*dytwt));
+	kfree(dytwt);
 }
 
 static struct notifier_block twt_nb = {
@@ -825,13 +850,21 @@ static struct notifier_block twt_nb = {
 
 int dytwt_init(struct wlan_ptracker_core *core)
 {
-	dytwt_mgmt_init(core);
+	core->dytwt = dytwt_mgmt_init(core);
 	dytwt_debugfs_init(core);
 	return wlan_ptracker_register_notifier(&core->notifier, &twt_nb);
 }
 
 void dytwt_exit(struct wlan_ptracker_core *core)
 {
-	dytwt_mgmt_exit();
-	return wlan_ptracker_unregister_notifier(&core->notifier, &twt_nb);
+	struct dytwt_manager *dytwt = core->dytwt;
+
+	core->dytwt = NULL;
+	wlan_ptracker_unregister_notifier(&core->notifier, &twt_nb);
+
+	if (!dytwt)
+		return;
+
+	dytwt_debugfs_exit(dytwt);
+	dytwt_mgmt_exit(dytwt);
 }

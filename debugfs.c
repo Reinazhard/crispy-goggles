@@ -75,7 +75,7 @@ static ssize_t action_write(struct file *file,
 		ptracker_err(core, "action %d is not supported!\n", action);
 		return -ENOTSUPP;
 	}
-	return 0;
+	return len;
 }
 
 static const struct file_operations dscp_ops = {
@@ -85,18 +85,56 @@ static const struct file_operations dscp_ops = {
 	.llseek = generic_file_llseek,
 };
 
+static ssize_t ptracker_sysfs_show(struct kobject *kobj, struct attribute *attr, char *buf)
+{
+	struct wlan_ptracker_debugfs *debugfs = container_of(kobj, struct wlan_ptracker_debugfs,
+		kobj);
+	struct ptracker_kobj_attr *ptracker_attr = container_of(attr, struct ptracker_kobj_attr,
+		attr);
+	int ret = -EIO;
+
+	if (ptracker_attr->show)
+		ret = ptracker_attr->show(debugfs, buf);
+	return ret;
+}
+
+static ssize_t ptracker_sysfs_store(struct kobject *kobj, struct attribute *attr, const char *buf,
+	size_t count)
+{
+	struct wlan_ptracker_debugfs *debugfs =
+		container_of(kobj, struct wlan_ptracker_debugfs, kobj);
+	struct ptracker_kobj_attr *ptracker_attr =
+		container_of(attr, struct ptracker_kobj_attr, attr);
+	int ret = -EIO;
+
+	if (ptracker_attr->store)
+		ret = ptracker_attr->store(debugfs, buf, count);
+	return ret;
+}
+
+static struct sysfs_ops ptracker_sysfs_ops = {
+	.show = ptracker_sysfs_show,
+	.store = ptracker_sysfs_store,
+};
+
+static struct kobj_type ptracker_ktype = {
+	.sysfs_ops = &ptracker_sysfs_ops,
+};
+
 static int wlan_ptracker_sysfs_init(struct wlan_ptracker_debugfs *debugfs)
 {
-	debugfs->kobj = kobject_create_and_add("wlan_ptracker", NULL);
-	if (!debugfs->kobj)
-		return -ENODEV;
-	return 0;
+	int ret;
+
+	ret = kobject_init_and_add(&debugfs->kobj, &ptracker_ktype, NULL, PTRACKER_PREFIX);
+	if (ret)
+		kobject_put(&debugfs->kobj);
+	return ret;
 }
 
 static void wlan_ptracker_sysfs_exit(struct wlan_ptracker_debugfs *debugfs)
 {
-	if (debugfs->kobj)
-		kobject_put(debugfs->kobj);
+	kobject_del(&debugfs->kobj);
+	kobject_put(&debugfs->kobj);
 }
 
 int wlan_ptracker_debugfs_init(struct wlan_ptracker_debugfs *debugfs)
@@ -104,7 +142,7 @@ int wlan_ptracker_debugfs_init(struct wlan_ptracker_debugfs *debugfs)
 	struct wlan_ptracker_core *core = container_of(
 		debugfs, struct wlan_ptracker_core, debugfs);
 
-	debugfs->root = debugfs_create_dir("wlan_ptracker", NULL);
+	debugfs->root = debugfs_create_dir(PTRACKER_PREFIX, NULL);
 	if (!debugfs->root)
 		return -ENODEV;
 	debugfs_create_file("action", 0600, debugfs->root, core, &dscp_ops);
@@ -177,7 +215,8 @@ static int history_get_tm(struct history_entry *entry, char *time, size_t len)
 	return scnprintf(time, len, "%ptRs", &tm);
 }
 
-size_t wlan_ptracker_history_read(struct history_manager *hm, char *buf, int buf_len)
+size_t wlan_ptracker_history_read(struct wlan_ptracker_core *core, struct history_manager *hm,
+	char *buf, int buf_len)
 {
 	u8 *ptr;
 	struct history_entry *cur, *next;
@@ -201,7 +240,7 @@ size_t wlan_ptracker_history_read(struct history_manager *hm, char *buf, int buf
 		len += history_get_tm(cur, buf + len, buf_len - len);
 		len += scnprintf(buf + len, buf_len - len, "%12s =>", state2str[cur->state]);
 		if (hm->priv_read)
-			len += hm->priv_read(cur, next, buf + len, buf_len - len);
+			len += hm->priv_read(core, cur, next, buf + len, buf_len - len);
 		len += scnprintf(buf + len, buf_len - len, "\n");
 		ptr += hm->entry_size;
 	}

@@ -134,7 +134,14 @@ struct dytwt_manager {
 	struct delayed_work setup_wq;
 	struct wlan_ptracker_core *core;
 	struct dytwt_counters counters;
+	struct kobject kobj;
 	struct dentry *dir;
+};
+
+struct dytwt_kobj_attr {
+	struct attribute attr;
+	ssize_t (*show)(struct dytwt_manager *, char *);
+	ssize_t (*store)(struct dytwt_manager *, const char *, size_t count);
 };
 
 extern int dytwt_init(struct wlan_ptracker_core *core);
