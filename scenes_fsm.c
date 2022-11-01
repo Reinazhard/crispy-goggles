@@ -52,7 +52,6 @@ static int fsm_thread(void *param)
 	struct wlan_ptracker_core *core = fsm_to_core(fsm);
 
 	while (fsm->thread_run) {
-		set_current_state(TASK_INTERRUPTIBLE);
 		if (kthread_should_stop()) {
 			ptracker_info(core, "kthread is stopped\n");
 			break;

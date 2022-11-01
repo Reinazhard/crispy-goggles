@@ -175,26 +175,16 @@ static int tp_monitor_debugfs_init(struct wlan_ptracker_core *core)
 {
 	struct wlan_ptracker_debugfs *debugfs = &core->debugfs;
 	struct tp_monitor_stats *stats = &core->tp;
-	struct wlan_ptracker_client *client;
-	int ret = 0;
+	struct wlan_ptracker_client *client = core->client;
 
-	rcu_read_lock();
-	client = rcu_dereference(core->client);
-	if (!client) {
-		ret = -ENODEV;
-		goto out;
-	}
 	stats->dir = debugfs_create_dir(client->ifname, debugfs->root);
-	if (!stats->dir) {
-		ret = -ENODEV;
-		goto out;
-	}
+	if (!stats->dir)
+		return -ENODEV;
+
 	debugfs_create_u32("log_level", 0600, stats->dir, &stats->debug);
 	debugfs_create_file("tx", 0400, stats->dir, &stats->tx, &counter_ops);
 	debugfs_create_file("rx", 0400, stats->dir, &stats->rx, &counter_ops);
-out:
-	rcu_read_unlock();
-	return ret;
+	return 0;
 }
 
 int tp_monitor_init(struct tp_monitor_stats *stats)
