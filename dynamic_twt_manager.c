@@ -51,7 +51,7 @@ static struct dytwt_scene_action dytwt_actions[WLAN_SCENE_MAX + 1] = {
 		},
 	},
 	{
-		.action = TWT_ACTION_SETUP,
+		.action = TWT_ACTION_TEARDOWN,
 		.param = {
 			.config_id = DYMAIC_TWT_CONFIG_ID,
 			.nego_type = 0,
