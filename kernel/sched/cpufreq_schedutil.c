@@ -329,12 +329,6 @@ unsigned long schedutil_cpu_util(int cpu, unsigned long util_cfs,
 }
 EXPORT_SYMBOL_GPL(schedutil_cpu_util);
 
-unsigned long sched_cpu_util(int cpu, unsigned long max)
-{
-	return schedutil_cpu_util(cpu, cpu_util_cfs(cpu_rq(cpu)), max,
-				  ENERGY_UTIL, NULL);
-}
-
 unsigned long sugov_effective_cpu_perf(int cpu, unsigned long actual,
 				 unsigned long min,
 				 unsigned long max)
