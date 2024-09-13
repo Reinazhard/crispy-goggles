@@ -17,3 +17,24 @@ Description:
 
 		Access: Read/Write
 		Valid values: Represented as int
+
+What:		/sys/class/power_supply/maxfg/registers_dump
+Date:		Sep 2024
+Contact:	"Spade Lee" <spadelee@google.com>
+Description:
+		Read to dump fuel gauge registers
+Users:          Dumpstate
+
+What:		/sys/class/power_supply/maxfg_base/registers_dump
+Date:		Sep 2024
+Contact:	"Spade Lee" <spadelee@google.com>
+Description:
+		Read to dump base fuel gauge registers
+Users:          Dumpstate
+
+What:		/sys/class/power_supply/maxfg_secondary/registers_dump
+Date:		Sep 2024
+Contact:	"Spade Lee" <spadelee@google.com>
+Description:
+		Read to dump secondary fuel gauge registers
+Users:          Dumpstate

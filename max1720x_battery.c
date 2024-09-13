@@ -4467,6 +4467,67 @@ DEFINE_SIMPLE_ATTRIBUTE(debug_current_offset_fops, NULL, debug_current_offset, "
  *	break;
  */
 
+static ssize_t registers_dump_show(struct device *dev, struct device_attribute *attr,
+				   char *buf)
+{
+	struct power_supply *psy = container_of(dev, struct power_supply, dev);
+	struct max1720x_chip *chip = power_supply_get_drvdata(psy);
+	u32 reg_address, data;
+	int ret = 0, offset = 0;
+
+	if (!chip->regmap.regmap) {
+		dev_err(dev, "Failed to read, no regmap\n");
+		return -EIO;
+	}
+
+	for (reg_address = 0; reg_address <= 0xFF; reg_address++) {
+		if (!max1720x_is_reg(dev, reg_address))
+			continue;
+
+		ret = regmap_read(chip->regmap.regmap, reg_address, &data);
+		if (ret < 0)
+			continue;
+
+		ret = sysfs_emit_at(buf, offset, "%02x: %04x\n", reg_address, data);
+		if (!ret) {
+			dev_err(dev, "[%s]: Not all registers printed. last:%x\n", __func__,
+				reg_address - 1);
+			break;
+		}
+		offset += ret;
+	}
+
+	if (!chip->regmap_nvram.regmap)
+		return offset;
+
+	ret = sysfs_emit_at(buf, offset, "\nnvram:\n");
+	if (!ret)
+		return offset;
+
+	offset += ret;
+
+	for (reg_address = 0; reg_address <= 0xFF; reg_address++) {
+		if (!max1720x_is_nvram_reg(dev, reg_address))
+			continue;
+
+		ret = regmap_read(chip->regmap_nvram.regmap, reg_address, &data);
+		if (ret < 0)
+			continue;
+
+		ret = sysfs_emit_at(buf, offset, "%02x: %04x\n", reg_address, data);
+		if (!ret) {
+			dev_err(dev, "[%s]: Not all registers printed. last:%x\n", __func__,
+				reg_address - 1);
+			break;
+		}
+		offset += ret;
+	}
+
+	return offset;
+}
+
+static DEVICE_ATTR_RO(registers_dump);
+
 static ssize_t act_impedance_store(struct device *dev,
 			       struct device_attribute *attr,
 			       const char *buf, size_t count) {
@@ -4516,6 +4577,11 @@ static int max17x0x_init_sysfs(struct max1720x_chip *chip)
 	ret = device_create_file(&chip->psy->dev, &dev_attr_fix_cycle_count);
 	if (ret)
 		dev_err(&chip->psy->dev, "Failed to create fix_cycle_count\n");
+
+	/* registers */
+	ret = device_create_file(&chip->psy->dev, &dev_attr_registers_dump);
+	if (ret)
+		dev_err(&chip->psy->dev, "Failed to create registers_dump\n");
 
 	de = debugfs_create_dir(chip->max1720x_psy_desc.name, 0);
 	if (IS_ERR_OR_NULL(de))
