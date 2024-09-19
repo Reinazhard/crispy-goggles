@@ -191,8 +191,9 @@ struct max1720x_chip {
 	int model_reload;
 	bool model_ok;		/* model is running */
 	bool cycle_reg_ok;	/* restore cycle count from storage complete */
+	bool history_ok;	/* history is validated */
 
-	/* history */
+	/* max1720x history */
 	struct mutex history_lock;
 	int hcmajor;
 	struct cdev hcdev;
@@ -1151,10 +1152,12 @@ static ssize_t fix_cycle_count_store(struct device *dev,
 	struct max1720x_chip *chip = power_supply_get_drvdata(psy);
 	int ret;
 
-	if (buf[0] == '1') {
+	mutex_lock(&chip->model_lock);
+	if (buf[0] == '1' && !chip->por && !chip->history_ok) {
 		ret = max1720x_check_history(chip, true);
 		dev_info(chip->dev, "%s: fix cycle count (ret=%d)\n", __func__, ret);
 	}
+	mutex_unlock(&chip->model_lock);
 
 	return count;
 }
@@ -1618,7 +1621,7 @@ error_out:
 	return ret < 0 ? ret : 0;
 }
 
-/* needs mutex_lock(&chip->model_lock) && mutex_lock(&chip->history_lock) */
+/* call holding chip->model_lock */
 static int max1720x_check_history(struct max1720x_chip *chip, bool fix)
 {
 	struct max17x0x_eeprom_history temp = { 0 };
@@ -1626,7 +1629,7 @@ static int max1720x_check_history(struct max1720x_chip *chip, bool fix)
 	const int last_cycle_count = chip->cycle_count;
 
 	if (chip->cycle_count_offset < MAXIM_CYCLE_COUNT_RESET)
-		return 0;
+		goto done;
 
 	/* when the last entry before the overflow is non empty we are good */
 	ret = gbms_storage_read_data(GBMS_TAG_HIST, &temp, sizeof(temp),
@@ -1635,39 +1638,47 @@ static int max1720x_check_history(struct max1720x_chip *chip, bool fix)
 		return ret;
 
 	if (!max1720x_history_empty(&temp))
-		return 0;
+		goto done;
 
 	/* # of entries that need to be moved from OVERFLOW_START_ENTRY */
 	misplaced_count = max1720x_find_empty(OVERFLOW_START_ENTRY);
 	if (misplaced_count <= 0)
-		return 0;
+		goto done;
 
 	/* where entries will be moved to */
 	first_empty = max1720x_find_empty(0);
 	if (first_empty >= OVERFLOW_START_ENTRY)
-		return 0;
+		goto done;
 
 	est_cycle = (first_empty + DIV_ROUND_UP(last_cycle_count, EEPROM_DELTA_CYCLE) -
 		    OVERFLOW_START_ENTRY) * EEPROM_DELTA_CYCLE;
 
-	if (fix) {
-		ret = max1720x_recover_history(chip, first_empty, misplaced_count, est_cycle);
-		/* log first empty after recovery and result */
-		first_empty = max1720x_find_empty(0);
+	if (!fix) {
 		gbms_logbuffer_devlog(chip->monitor_log, chip->dev,
-				      LOGLEVEL_INFO, 0, LOGLEVEL_INFO,
-				      "0x%04X 00:%04X 01:%04X 02:%04X 03:%04X", MONITOR_TAG_HV,
-				      first_empty, ret, last_cycle_count, chip->cycle_count);
-		return ret;
+				LOGLEVEL_INFO, 0, LOGLEVEL_INFO,
+				"0x%04X 00:%04X 01:%04X 02:%04X 03:%04X", MONITOR_TAG_HV,
+				first_empty, misplaced_count, last_cycle_count, est_cycle);
+
+		return 0;
 	}
 
+	ret = max1720x_recover_history(chip, first_empty, misplaced_count, est_cycle);
+	/* log first empty after recovery and result */
+	first_empty = max1720x_find_empty(0);
 	gbms_logbuffer_devlog(chip->monitor_log, chip->dev,
-			      LOGLEVEL_INFO, 0, LOGLEVEL_INFO,
-			      "0x%04X 00:%04X 01:%04X 02:%04X 03:%04X", MONITOR_TAG_HV,
-			      first_empty, misplaced_count, last_cycle_count, est_cycle);
+				LOGLEVEL_INFO, 0, LOGLEVEL_INFO,
+				"0x%04X 00:%04X 01:%04X 02:%04X 03:%04X", MONITOR_TAG_HV,
+				first_empty, ret, last_cycle_count, chip->cycle_count);
+
+	if (ret < 0)
+		return ret;
+
+done:
+	chip->history_ok = true;
 	return 0;
 }
 
+/* call holding chip->model_lock */
 static int max1720x_restore_battery_cycle(struct max1720x_chip *chip)
 {
 	int ret;
@@ -1720,9 +1731,7 @@ static int max1720x_restore_battery_cycle(struct max1720x_chip *chip)
 	chip->cycle_count = reg_to_cycles((u32)reg_cycle, chip->gauge_type) +
 					  chip->cycle_count_offset;
 	chip->cycle_reg_ok = true;
-	mutex_lock(&chip->history_lock);
 	max1720x_check_history(chip, false);
-	mutex_unlock(&chip->history_lock);
 
 	return 0;
 }
@@ -1743,10 +1752,11 @@ static u16 max1720x_save_battery_cycle(const struct max1720x_chip *chip,
 	reg_cycle /= 2;
 
 	/* Over 655 cycles */
-	if (reg_cycle < eeprom_cycle)
+	if (reg_cycle < eeprom_cycle && chip->cycle_count_offset == MAXIM_CYCLE_COUNT_RESET)
 		reg_cycle |= EEPROM_CC_OVERFLOW_BIT;
 
-	if (reg_cycle <= eeprom_cycle)
+	/* Block write 0xFFFF to CNHS, or it would be reset during restore */
+	if (reg_cycle <= eeprom_cycle || reg_cycle == 0xFFFF)
 		return eeprom_cycle;
 
 	ret = gbms_storage_write(GBMS_TAG_CNHS, &reg_cycle,
@@ -1813,17 +1823,13 @@ static int max1720x_get_cycle_count_offset(struct max1720x_chip *chip)
 	return offset;
 }
 
+/* call holding chip->model_lock */
 static int max1720x_get_cycle_count(struct max1720x_chip *chip)
 {
-	int cc;
-
-	mutex_lock(&chip->history_lock);
-	cc = chip->cycle_count;
-	mutex_unlock(&chip->history_lock);
-
-	return cc;
+	return chip->cycle_count;
 }
 
+/* call holding chip->model_lock */
 static int max1720x_update_cycle_count(struct max1720x_chip *chip)
 {
 	int err, cycle_count;
@@ -1839,9 +1845,7 @@ static int max1720x_update_cycle_count(struct max1720x_chip *chip)
 	/* if cycle reg hasn't been restored from storage, restore it before update cycle count */
 	if (!chip->cycle_reg_ok && chip->gauge_type == MAX_M5_GAUGE_TYPE &&
 	    max_m5_recal_state(chip->model_data) == RE_CAL_STATE_IDLE) {
-		mutex_lock(&chip->model_lock);
 		err = max1720x_restore_battery_cycle(chip);
-		mutex_unlock(&chip->model_lock);
 		if (err < 0)
 			dev_err(chip->dev, "%s cannot restore cycle count (%d)\n", __func__, err);
 
@@ -1856,16 +1860,17 @@ static int max1720x_update_cycle_count(struct max1720x_chip *chip)
 			reg_cycle += max_m5_recal_cycle(chip->model_data);
 
 	cycle_count = reg_to_cycles((u32)reg_cycle, chip->gauge_type) + chip->cycle_count_offset;
-	if (cycle_count < chip->cycle_count) {
+	if (cycle_count < chip->cycle_count && chip->cycle_count_offset == 0) {
 		chip->cycle_count_offset = max1720x_get_cycle_count_offset(chip);
 		chip->model_next_update = -1;
 		dev_info(chip->dev, "cycle count last:%d, now:%d => cycle_count_offset:%d\n",
 			 chip->cycle_count, cycle_count, chip->cycle_count_offset);
+		cycle_count += chip->cycle_count_offset;
 	}
 
 	chip->eeprom_cycle = max1720x_save_battery_cycle(chip, reg_cycle);
 
-	chip->cycle_count = cycle_count;
+	chip->cycle_count = cycle_count >= chip->cycle_count ? cycle_count : chip->cycle_count;
 
 	if (chip->model_ok && reg_cycle >= chip->model_next_update) {
 		err = max1720x_set_next_update(chip);
@@ -3338,21 +3343,24 @@ static irqreturn_t max1720x_fg_irq_thread_fn(int irq, void *obj)
 	if (fg_status & MAX1720X_STATUS_DSOCI) {
 		const bool plugged = chip->cap_estimate.cable_in;
 
-		if (max1720x_check_drift_on_soc(&chip->drift_data))
-			max1720x_fixup_capacity(chip, plugged);
+		mutex_lock(&chip->model_lock);
+		if (!chip->por) {
+			if (max1720x_check_drift_on_soc(&chip->drift_data))
+				max1720x_fixup_capacity(chip, plugged);
 
-		if (storm) {
-			pr_debug("Force power_supply_change in storm\n");
-		} else {
-			max1720x_monitor_log_learning(chip, false);
-			max1720x_monitor_log_data(chip, false);
-			if (chip->gauge_type == MAX_M5_GAUGE_TYPE)
-				max_m5_check_recal_state(chip->model_data,
-							 chip->bhi_recalibration_algo,
-							 chip->eeprom_cycle);
-			max1720x_update_cycle_count(chip);
+			if (storm) {
+				pr_debug("Force power_supply_change in storm\n");
+			} else {
+				max1720x_monitor_log_learning(chip, false);
+				max1720x_monitor_log_data(chip, false);
+				if (chip->gauge_type == MAX_M5_GAUGE_TYPE)
+					max_m5_check_recal_state(chip->model_data,
+								 chip->bhi_recalibration_algo,
+								 chip->eeprom_cycle);
+				max1720x_update_cycle_count(chip);
+			}
 		}
-
+		mutex_unlock(&chip->model_lock);
 		storm = false;
 	}
 
@@ -5548,7 +5556,9 @@ static int max1720x_init_chip(struct max1720x_chip *chip)
 
 	/* max_m5 triggers loading of the model in the irq handler on POR */
 	if (!chip->por && chip->gauge_type == MAX_M5_GAUGE_TYPE) {
+		mutex_lock(&chip->model_lock);
 		ret = max1720x_restore_battery_cycle(chip);
+		mutex_unlock(&chip->model_lock);
 		if (ret < 0)
 			dev_err(chip->dev, "%s cannot restore cycle count (%d)\n", __func__, ret);
 
@@ -5770,6 +5780,8 @@ static void max1720x_cleanup_history(struct max1720x_chip *chip)
 static int max1720x_init_history_device(struct max1720x_chip *chip)
 {
 	struct device *hcdev;
+
+	mutex_init(&chip->history_lock);
 
 	chip->hcmajor = -1;
 
@@ -6186,7 +6198,9 @@ static int max17x0x_prop_read(gbms_tag_t tag, void *buff, size_t size,
 
 	switch (tag) {
 	case GBMS_TAG_CLHI:
+		mutex_lock(&chip->model_lock);
 		ret = max17x0x_collect_history_data(buff, size, chip);
+		mutex_unlock(&chip->model_lock);
 		break;
 
 	default:
@@ -6595,7 +6609,6 @@ static int max1720x_probe(struct i2c_client *client,
 
 	/* fuel gauge model needs to know the batt_id */
 	mutex_init(&chip->model_lock);
-	mutex_init(&chip->history_lock);
 
 	chip->get_prop_ws = wakeup_source_register(NULL, "GetProp");
 	if (!chip->get_prop_ws)
