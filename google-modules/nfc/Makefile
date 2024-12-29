@@ -14,5 +14,8 @@ KBUILD_OPTIONS += CONFIG_NFC_ST21NFC=m CONFIG_NFC_ST21NFC_NO_CRYSTAL=y \
 
 ccflags-y := -I$(KERNEL_SRC)/../google-modules/nfc
 
-modules modules_install clean:
+all:
+	$(MAKE) -C $(KERNEL_SRC) M=$(M) W=1 $(KBUILD_OPTIONS) modules
+
+modules_install clean:
 	$(MAKE) -C $(KERNEL_SRC) M=$(M) $(KBUILD_OPTIONS) W=1 $(@)

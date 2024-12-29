@@ -218,7 +218,6 @@ ifeq ($(MALI_KCONFIG_EXT_PREFIX),)
 endif
 
 THIS_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
--include $(THIS_DIR)/../arbitration/Makefile
 
 # MAKE_ARGS to pass the custom CONFIGs on out-of-tree build
 #
@@ -319,10 +318,10 @@ ifeq ($(CONFIG_MALI_KCOV),y)
 endif
 
 all:
-	$(MAKE) -C $(KDIR) M=$(M) W=1 $(MAKE_ARGS) EXTRA_CFLAGS="$(EXTRA_CFLAGS)" KBUILD_EXTRA_SYMBOLS="$(EXTRA_SYMBOLS)" modules
+	$(MAKE) -C $(KDIR) M=$(M) $(MAKE_ARGS) EXTRA_CFLAGS="$(EXTRA_CFLAGS)" KBUILD_EXTRA_SYMBOLS="$(EXTRA_SYMBOLS)" modules
 
 modules_install:
-	$(MAKE) -C $(KDIR) M=$(M) W=1 $(MAKE_ARGS) modules_install
+	$(MAKE) -C $(KDIR) M=$(M) $(MAKE_ARGS) modules_install
 
 clean:
-	$(MAKE) -C $(KDIR) M=$(M) W=1 $(MAKE_ARGS) clean
+	$(MAKE) -C $(KDIR) M=$(M) $(MAKE_ARGS) clean

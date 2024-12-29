@@ -14,13 +14,13 @@ EXTRA_CFLAGS	+= -DDYNAMIC_DEBUG_MODULE
 EXTRA_CFLAGS	+= -I$(KERNEL_SRC)/../google-modules/touch/common/include
 EXTRA_CFLAGS    += -I$(KERNEL_SRC)/../google-modules/display
 
-modules clean:
+all:
 	$(MAKE) -C $(KERNEL_SRC) M=$(M) \
-	$(KBUILD_OPTIONS) \
-	EXTRA_CFLAGS="$(EXTRA_CFLAGS)" \
-	$(@)
+        $(KBUILD_OPTIONS) \
+        EXTRA_CFLAGS="$(EXTRA_CFLAGS)" \
+        modules
 
-modules_install:
+modules_install clean:
 	$(MAKE) -C $(KERNEL_SRC) M=$(M) \
 	$(KBUILD_OPTIONS) \
 	EXTRA_CFLAGS="$(EXTRA_CFLAGS)" \

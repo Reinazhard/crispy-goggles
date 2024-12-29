@@ -11,7 +11,15 @@ EXTRA_CFLAGS	+= -I$(KERNEL_SRC)/../google-modules/touch/common
 EXTRA_CFLAGS	+= -I$(KERNEL_SRC)/../google-modules/touch/common/include
 EXTRA_SYMBOLS	+= $(OUT_DIR)/../google-modules/touch/common/Module.symvers
 
-modules modules_install clean:
+all:
+	$(MAKE) -C $(KERNEL_SRC) M=$(M) \
+	$(KBUILD_OPTIONS) \
+	EXTRA_CFLAGS="$(EXTRA_CFLAGS)" \
+	KBUILD_EXTRA_SYMBOLS="$(EXTRA_SYMBOLS)" \
+        modules
+
+
+modules_install clean:
 	$(MAKE) -C $(KERNEL_SRC) M=$(M) \
 	$(KBUILD_OPTIONS) \
 	EXTRA_CFLAGS="$(EXTRA_CFLAGS)" \

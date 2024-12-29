@@ -28,5 +28,7 @@ EXTRA_CFLAGS += -I$(KERNEL_SRC)/../google-modules/wlan/wlan_ptracker
 
 ccflags-y := $(EXTRA_CFLAGS)
 
+all:
+	$(MAKE) -C $(KERNEL_SRC) M=$(M) $(KBUILD_OPTIONS) modules
 modules modules_install clean:
 	$(MAKE) -C $(KERNEL_SRC) M=$(M) $(KBUILD_OPTIONS) W=1 $(@)

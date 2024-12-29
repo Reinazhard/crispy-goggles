@@ -5964,7 +5964,7 @@ static void fts_set_display_state(struct fts_ts_info *info,
 	info->display_state = display_state;
 }
 
-struct drm_connector *get_bridge_connector(struct drm_bridge *bridge)
+static struct drm_connector *get_bridge_connector(struct drm_bridge *bridge)
 {
 	struct drm_connector *connector;
 	struct drm_connector_list_iter conn_iter;
