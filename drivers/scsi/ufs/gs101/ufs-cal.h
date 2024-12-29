@@ -413,33 +413,6 @@ static struct ufs_cal_phy_cfg pre_h8_exit[] = {
 	{0, 0, 0, 0, PHY_CFG_NONE, BRD_ALL}
 };
 
-static struct ufs_cal_phy_cfg loopback_init[] = {
-	/* mib(just to monitor), sfr offset, value, .. */
-	{0x0000, 0xBB4, 0x23, PMD_ALL, PHY_PMA_TRSV, BRD_ALL},
-	{0x0000, 0x868, 0x02, PMD_ALL, PHY_PMA_TRSV, BRD_ALL},
-	{0x0000, 0x9A8, 0xA1, PMD_ALL, PHY_PMA_TRSV, BRD_ALL},
-	{0x0000, 0x9AC, 0x40, PMD_ALL, PHY_PMA_TRSV, BRD_ALL},
-
-	{0, 0, 0, 0, PHY_CFG_NONE, BRD_ALL}
-};
-
-static struct ufs_cal_phy_cfg loopback_set_1[] = {
-	/* mib(just to monitor), sfr offset, value, .. */
-	{0x0000, 0xBB4, 0x2B, PMD_ALL, PHY_PMA_TRSV, BRD_ALL},
-	{0x0000, 0x888, 0x06, PMD_ALL, PHY_PMA_TRSV, BRD_ALL},
-
-	{0, 0, 0, 0, PHY_CFG_NONE, BRD_ALL}
-};
-
-static struct ufs_cal_phy_cfg loopback_set_2[] = {
-	/* mib(just to monitor), sfr offset, value, .. */
-	{0x0000, 0x9BC, 0x52, PMD_ALL, PHY_PMA_TRSV, BRD_ALL},
-	{0x0000, 0x9A8, 0xA7, PMD_ALL, PHY_PMA_TRSV, BRD_ALL},
-	{0x0000, 0x8AC, 0xC3, PMD_ALL, PHY_PMA_TRSV, BRD_ALL},
-
-	{0, 0, 0, 0, PHY_CFG_NONE, BRD_ALL}
-};
-
 static struct ufs_cal_phy_cfg eom_prepare[] = {
 	/* mib(just to monitor), sfr offset, value, .. */
 	{0x0000, 0xBC0, 0x00, PMD_HS, PHY_PMA_TRSV, BRD_ALL},
@@ -510,21 +483,6 @@ static struct ufs_cal_phy_cfg post_h8_enter_card[] = {
 };
 
 static struct ufs_cal_phy_cfg pre_h8_exit_card[] = {
-	/* mib(just to monitor), sfr offset, value, .. */
-	{0, 0, 0, 0, PHY_CFG_NONE, BRD_ALL}
-};
-
-static struct ufs_cal_phy_cfg loopback_init_card[] = {
-	/* mib(just to monitor), sfr offset, value, .. */
-	{0, 0, 0, 0, PHY_CFG_NONE, BRD_ALL}
-};
-
-static struct ufs_cal_phy_cfg loopback_set_1_card[] = {
-	/* mib(just to monitor), sfr offset, value, .. */
-	{0, 0, 0, 0, PHY_CFG_NONE, BRD_ALL}
-};
-
-static struct ufs_cal_phy_cfg loopback_set_2_card[] = {
 	/* mib(just to monitor), sfr offset, value, .. */
 	{0, 0, 0, 0, PHY_CFG_NONE, BRD_ALL}
 };
