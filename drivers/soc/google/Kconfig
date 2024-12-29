@@ -20,6 +20,9 @@ config BOARD_SLIDER
 	bool "Google Slider Board"
 	depends on SOC_GS101
 	select OF_GENERATE_SYMBOLS
+	select DRM_KMS_HELPER
+	select V4L2_MEM2MEM_DEV
+	select VIDEOBUF2_DMA_SG
 
 config BOARD_CLOUDRIPPER
 	bool "Google Cloudripper Board"
